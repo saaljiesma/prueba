@@ -3,7 +3,7 @@ const router = express.Router();
 const { spawn } = require('child_process');
 
 /**
- * Stream VOD/LIVE ultra-optimizado
+ * Stream VOD/LIVE optimizado
  * GET /stream?url=...&type=vod|live
  */
 router.get('/', (req, res) => {
@@ -15,8 +15,8 @@ router.get('/', (req, res) => {
 
     // Movflags y bufsize según tipo
     const movFlags = isVOD 
-        ? 'faststart+frag_keyframe+empty_moov+default_base_moof'
-        : 'frag_keyframe+empty_moov+default_base_moof';
+        ? 'faststart+frag_keyframe+default_base_moof' // VOD → barra completa y seek funcional
+        : 'frag_keyframe+empty_moov+default_base_moof'; // LIVE → baja latencia
     const bufSize = isVOD ? '100M' : '10M';
 
     // Headers para navegador
