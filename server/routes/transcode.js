@@ -3,31 +3,29 @@ const router = express.Router();
 const { spawn } = require('child_process');
 
 /**
- * Stream VOD/LIVE optimizado para barra completa y seek funcional
+ * Stream VOD/LIVE optimizado para duración completa y seek funcional
+ * GET /stream?url=...&type=vod|live
  */
 router.get('/', (req, res) => {
     const { url, type } = req.query;
     if (!url) return res.status(400).json({ error: 'URL parameter is required' });
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
+    const isVOD = type === 'vod';
 
-    // Detección inteligente VOD/LIVE
-    const isVOD = type === 'vod' || url.includes('/movie/') || url.includes('/series/') || url.toLowerCase().endsWith('.mkv');
-
-    // Movflags según tipo
+    // Movflags y bufsize según tipo
     const movFlags = isVOD
-        ? 'faststart+frag_keyframe+default_base_moof' // VOD → barra completa y seek funcional
+        ? 'faststart+frag_keyframe+default_base_moof' // VOD → duración completa y seek
         : 'frag_keyframe+empty_moov+default_base_moof'; // LIVE → baja latencia
-
     const bufSize = isVOD ? '100M' : '10M';
 
     // Headers para navegador
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Accept-Ranges', 'bytes'); // Crucial para que el navegador sepa que puede hacer seek
+    res.setHeader('Accept-Ranges', 'bytes'); // Crucial para seek
 
-    // FFmpeg arguments
+    // FFmpeg args
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
@@ -37,12 +35,12 @@ router.get('/', (req, res) => {
         '-i', url,
         '-map', '0:v:0',
         '-map', '0:a:0?',
-        '-c:v', 'copy', // CPU mínima
-        '-c:a', 'aac',  // Audio universal
+        '-c:v', 'copy',
+        '-c:a', 'aac',
         '-ac', '2',
         '-b:a', '192k',
         '-af', 'aresample=async=1:min_hard_comp=0.100:first_pts=0',
-        '-g', isVOD ? '48' : '250', // Keyframes frecuentes en VOD para seek rápido
+        '-g', isVOD ? '48' : '250', // keyframes frecuentes en VOD para seek
         '-f', 'mp4',
         '-movflags', movFlags,
         '-bufsize', bufSize,
@@ -51,7 +49,7 @@ router.get('/', (req, res) => {
         '-'
     ];
 
-    console.log(`[NodeCast] Modo: ${isVOD ? 'PELÍCULA (Seek habilitado)' : 'LIVE (Latencia baja)'}`);
+    console.log(`[NodeCast] Modo: ${isVOD ? 'PELÍCULA (Duración completa)' : 'LIVE (Baja Latencia)'}`);
     console.log(`[FFmpeg] Comando: ${ffmpegPath} ${args.join(' ')}`);
 
     const ffmpeg = spawn(ffmpegPath, args);
@@ -65,14 +63,14 @@ router.get('/', (req, res) => {
         if (msg.toLowerCase().includes('error')) console.error('[FFmpeg Error]', msg);
     });
 
-    // Limpieza total al cerrar la pestaña o el reproductor
+    // Limpieza al cerrar la pestaña
     req.on('close', () => {
-        console.log('[Stream] Cliente desconectado, cerrando FFmpeg');
+        console.log('[Stream] Cliente desconectado, matando FFmpeg');
         ffmpeg.kill('SIGKILL');
     });
 
     ffmpeg.on('exit', code => {
-        if (code && code !== 255) console.log(`[Stream] FFmpeg salió con código ${code}`);
+        if (code && code !== 255) console.log(`[Stream] FFmpeg finalizó con código ${code}`);
     });
 
     ffmpeg.on('error', err => {
