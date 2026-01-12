@@ -1,124 +1,102 @@
 const express = require('express');
 const router = express.Router();
-const { spawn, exec } = require('child_process');
+const { spawn } = require('child_process');
 
 /**
- * Transcode stream optimizado para Raspberry Pi 4
- * Especial para películas MKV y visualización en iOS/Safari
+ * Stream VOD/LIVE optimizado para Raspberry Pi 4
+ * Habilita la barra de búsqueda y soluciona desconexiones prematuras
  */
-router.get('/', async (req, res) => {
-    const { url } = req.query;
-    if (!url) {
-        return res.status(400).json({ error: 'URL parameter is required' });
-    }
+router.get('/', (req, res) => {
+    const { url, type } = req.query;
+    if (!url) return res.status(400).json({ error: 'URL parameter is required' });
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
-    const ffprobePath = req.app.locals.ffprobePath || 'ffprobe';
 
-    // DETECCIÓN INTELIGENTE DE PELÍCULA (VOD)
-    const isVOD = url.includes('/movie/') || 
+    // 1. DETECCIÓN AUTOMÁTICA DE VOD (Películas/Series)
+    const isVOD = type === 'vod' || 
+                  url.includes('/movie/') || 
                   url.includes('/series/') || 
                   url.toLowerCase().endsWith('.mkv') || 
                   url.toLowerCase().endsWith('.mp4');
 
-    // CONFIGURACIÓN DE FLAGS SEGÚN EL TIPO
-    const movFlags = isVOD 
-        ? 'faststart+empty_moov+omit_tfhd_offset+frag_keyframe+default_base_moof' 
+    // 2. CONFIGURACIÓN DE MOVFLAGS PARA HABILITAR EL SEEK
+    // faststart: Mueve los índices al principio para que el navegador sepa la duración.
+    // frag_discont: Ayuda a que el navegador no se corte si hay baches en la red.
+    const movFlags = isVOD
+        ? 'faststart+empty_moov+omit_tfhd_offset+frag_discont' 
         : 'frag_keyframe+empty_moov+default_base_moof';
 
-    console.log(`[NodeCast] Iniciando: ${isVOD ? 'PELÍCULA (VOD)' : 'CANAL EN DIRECTO'}`);
-
-    // --- PROBE con ffprobe para obtener duración ---
-    let durationSeconds = null;
-    if (isVOD) {
-        try {
-            const cmd = `${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${url}"`;
-            durationSeconds = await new Promise((resolve, reject) => {
-                exec(cmd, (err, stdout, stderr) => {
-                    if (err) return reject(err);
-                    const dur = parseFloat(stdout);
-                    resolve(isNaN(dur) ? null : dur);
-                });
-            });
-            console.log(`[NodeCast] Duración detectada: ${durationSeconds}s`);
-        } catch (err) {
-            console.warn('[NodeCast] No se pudo obtener duración con ffprobe:', err.message);
-        }
-    }
-
-    // ARGUMENTOS FFMPEG
-    const args = [
-        '-hide_banner',
-        '-loglevel', 'warning',
-        '-user_agent', 'VLC/3.0.20 (Linux; x86_64)',
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '4',
-        '-i', url,
-        '-map', '0:v:0',
-        '-map', '0:a:0?',
-        '-c:v', 'copy',
-        '-c:a', 'aac',
-        '-ac', '2',
-        '-b:a', '192k',
-        '-af', 'aresample=async=1:min_hard_comp=0.100000:first_pts=0',
-        '-f', 'mp4',
-        '-movflags', movFlags,
-        '-max_muxing_queue_size', '4096',
-        '-bufsize', isVOD ? '50M' : '8M',
-        '-flush_packets', '1',
-        '-'
-    ];
-
-    console.log('[FFmpeg Full Command]', `${ffmpegPath} ${args.join(' ')}`);
-
-    let ffmpeg;
-    try {
-        ffmpeg = spawn(ffmpegPath, args);
-    } catch (spawnErr) {
-        console.error('[Transcode] Error fatal al iniciar FFmpeg:', spawnErr);
-        return res.status(500).json({ error: 'FFmpeg failed' });
-    }
-
-    // HEADERS para navegador
+    // 3. HEADERS DE COMPATIBILIDAD
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    if (durationSeconds) {
-        res.setHeader('X-Video-Duration', durationSeconds); // Duración en segundos
+    
+    // Crucial para que el navegador permita saltar a cualquier punto
+    if (isVOD) {
+        res.setHeader('Accept-Ranges', 'bytes');
     }
 
-    // STREAM
+    // 4. ARGUMENTOS DE FFMPEG (Equilibrio estabilidad/rendimiento)
+    const args = [
+        '-hide_banner',
+        '-loglevel', 'warning',
+        
+        // Robustez ante cortes del servidor IPTV
+        '-reconnect', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
+        
+        '-i', url, // Entrada remota
+
+        '-map', '0:v:0',
+        '-map', '0:a:0?',
+        
+        // Remuxing: Video directo (0% CPU) y Audio a AAC (Compatible universal)
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-ac', '2',
+        '-b:a', '128k', // Bitrate eficiente para evitar saturar el buffer
+        
+        '-af', 'aresample=async=1:min_hard_comp=0.100:first_pts=0',
+        
+        '-f', 'mp4',
+        '-movflags', movFlags,
+        '-bufsize', isVOD ? '32M' : '10M', // Buffer optimizado para RPi4
+        '-max_muxing_queue_size', '4096',
+        '-'
+    ];
+
+    console.log(`[NodeCast] Iniciando: ${isVOD ? 'PELÍCULA (Seek Habilitado)' : 'LIVE'}`);
+    
+    const ffmpeg = spawn(ffmpegPath, args);
+
+    // Enviar el stream al navegador
     ffmpeg.stdout.pipe(res);
 
-    let ffmpegStarted = false;
-    ffmpeg.stdout.once('data', () => {
-        ffmpegStarted = true;
-    });
-
-    // Manejo de errores críticos
-    ffmpeg.stderr.on('data', (data) => {
+    // Captura de errores para depuración
+    ffmpeg.stderr.on('data', data => {
         const msg = data.toString();
         if (msg.toLowerCase().includes('error')) {
             console.error('[FFmpeg Error]', msg.trim());
         }
     });
 
-    // Limpieza al cerrar la pestaña
+    // 5. GESTIÓN DE DESCONEXIÓN (Evita el "Cliente desconectado" por peticiones dobles)
     req.on('close', () => {
-        if (ffmpegStarted) {
-            console.log('[Transcode] Cliente desconectado tras iniciar reproducción. Cerrando FFmpeg...');
-            ffmpeg.kill('SIGKILL');
-        } else {
-            console.log('[Transcode] Cliente desconectado antes de iniciar streaming. No matamos FFmpeg todavía.');
-        }
+        // Esperamos 3 segundos antes de matar el proceso por si el navegador 
+        // solo está reiniciando la conexión para pedir un rango de bytes (Seeking)
+        setTimeout(() => {
+            if (req.aborted || res.finished || !res.writable) {
+                console.log('[Stream] Cliente desconectado permanentemente. Matando FFmpeg...');
+                ffmpeg.kill('SIGKILL');
+            }
+        }, 3000);
     });
 
     ffmpeg.on('exit', code => {
-        if (!ffmpegStarted && !res.headersSent) {
-            res.status(500).json({ error: `FFmpeg no pudo iniciar, código ${code}` });
-        } else if (code !== 0 && code !== 255) {
-            console.error(`[Transcode] FFmpeg terminó con error: ${code}`);
+        if (code && code !== 255) {
+            console.log(`[Stream] FFmpeg finalizó con código ${code}`);
         }
     });
 });
