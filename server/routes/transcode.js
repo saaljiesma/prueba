@@ -21,7 +21,6 @@ router.get('/', (req, res) => {
                   url.toLowerCase().endsWith('.mp4');
 
     // 2. CONFIGURACIÓN DE FLAGS SEGÚN EL TIPO
-    // faststart es clave para que el iPhone/Safari cargue la peli rápido
     let movFlags = isVOD 
         ? 'faststart+empty_moov+default_base_moof' 
         : 'frag_keyframe+empty_moov+default_base_moof';
@@ -31,24 +30,28 @@ router.get('/', (req, res) => {
     // 3. ARGUMENTOS OPTIMIZADOS (VLC Agent + Copy Video + AAC Audio)
     const args = [
         '-hide_banner',
-        '-loglevel', 'warning',
-        '-user_agent', 'VLC/3.0.20 (Linux; x86_64)', // Tu UA de confianza
+        '-loglevel', 'debug',    // 🔹 debug para ver todo en stderr
+        '-report',               // 🔹 genera archivo ffmpeg-*.log
+        '-user_agent', 'VLC/3.0.20 (Linux; x86_64)',
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '4',
         '-i', url,
         '-map', '0:v:0',
         '-map', '0:a:0?',
-        '-c:v', 'copy',      // RPi4: 0% CPU en video
-        '-c:a', 'aac',       // Compatible con iOS/Safari
-        '-ac', '2',          // Estéreo
-        '-b:a', '128k',      // Calidad eficiente
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-ac', '2',
+        '-b:a', '128k',
         '-af', 'aresample=async=1:min_hard_comp=0.100000:first_pts=0',
         '-f', 'mp4',
         '-movflags', movFlags,
         '-flush_packets', '1',
         '-'
     ];
+
+    // ✅ Mostrar en consola los argumentos que se van a usar
+    console.log('[FFmpeg Args]', args.join(' '));
 
     let ffmpeg;
     try {
@@ -61,17 +64,18 @@ router.get('/', (req, res) => {
     // Headers para que el navegador lo reconozca como video MP4
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    // Header extra para saber qué modo se aplicó (puedes verlo en F12)
     res.setHeader('X-Stream-Type', isVOD ? 'VOD' : 'LIVE');
+
+    // 🔹 Header opcional con resumen seguro de argumentos (sin URL completa)
+    const safeArgs = args.map(arg => arg === url ? '[URL]' : arg).join(' ');
+    res.setHeader('X-FFmpeg-Args', safeArgs);
 
     // Tubería de datos: FFmpeg -> Navegador
     ffmpeg.stdout.pipe(res);
 
-    // Logs de error para depurar
+    // Logs de FFmpeg en tiempo real
     ffmpeg.stderr.on('data', (data) => {
-        if (data.toString().includes('Error')) {
-            console.log(`[FFmpeg Error] ${data.toString()}`);
-        }
+        console.log(`[FFmpeg Output] ${data.toString()}`);
     });
 
     // IMPORTANTE: Matar el proceso al cerrar la pestaña para no saturar la RPi4
@@ -83,6 +87,8 @@ router.get('/', (req, res) => {
     ffmpeg.on('exit', (code) => {
         if (code !== null && code !== 0 && code !== 255) {
             console.error(`[Transcode] FFmpeg salió con código ${code}`);
+        } else {
+            console.log('[Transcode] FFmpeg finalizó correctamente.');
         }
     });
 });
