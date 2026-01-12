@@ -10,38 +10,39 @@ router.get('/', (req, res) => {
     if (!url) return res.status(400).json({ error: 'URL parameter is required' });
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
-    // Detección mejorada: si la URL contiene movie/series o es mkv, es VOD por defecto
+
+    // Detección inteligente VOD/LIVE
     const isVOD = type === 'vod' || url.includes('/movie/') || url.includes('/series/') || url.toLowerCase().endsWith('.mkv');
 
-    // CONFIGURACIÓN MAESTRA PARA SEEK
-    // Para VOD eliminamos frag_keyframe para que el navegador no crea que es un "en vivo" infinito.
+    // Movflags según tipo
     const movFlags = isVOD
-        ? 'faststart+empty_moov+omit_tfhd_offset+frag_discont' 
-        : 'frag_keyframe+empty_moov+default_base_moof';
+        ? 'faststart+frag_keyframe+default_base_moof' // VOD → barra completa y seek funcional
+        : 'frag_keyframe+empty_moov+default_base_moof'; // LIVE → baja latencia
 
     const bufSize = isVOD ? '100M' : '10M';
 
-    // Headers para habilitar el salto de tiempo (Seek) en cualquier navegador
+    // Headers para navegador
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Accept-Ranges', 'bytes'); // Crucial para que el navegador sepa que puede saltar
+    res.setHeader('Accept-Ranges', 'bytes'); // Crucial para que el navegador sepa que puede hacer seek
 
+    // FFmpeg arguments
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
-        '-seekable', '1', // Obliga a FFmpeg a permitir saltos en el stream de origen
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '4',
         '-i', url,
         '-map', '0:v:0',
         '-map', '0:a:0?',
-        '-c:v', 'copy', // 0% CPU en Raspberry Pi 4
-        '-c:a', 'aac',  // Audio universal para todos los navegadores
+        '-c:v', 'copy', // CPU mínima
+        '-c:a', 'aac',  // Audio universal
         '-ac', '2',
         '-b:a', '192k',
         '-af', 'aresample=async=1:min_hard_comp=0.100:first_pts=0',
+        '-g', isVOD ? '48' : '250', // Keyframes frecuentes en VOD para seek rápido
         '-f', 'mp4',
         '-movflags', movFlags,
         '-bufsize', bufSize,
@@ -55,10 +56,10 @@ router.get('/', (req, res) => {
 
     const ffmpeg = spawn(ffmpegPath, args);
 
-    // Tubería de salida directamente al navegador
+    // Tubería de salida al navegador
     ffmpeg.stdout.pipe(res);
 
-    // Captura de errores para el Log Viewer
+    // Captura de errores
     ffmpeg.stderr.on('data', data => {
         const msg = data.toString();
         if (msg.toLowerCase().includes('error')) console.error('[FFmpeg Error]', msg);
@@ -72,6 +73,11 @@ router.get('/', (req, res) => {
 
     ffmpeg.on('exit', code => {
         if (code && code !== 255) console.log(`[Stream] FFmpeg salió con código ${code}`);
+    });
+
+    ffmpeg.on('error', err => {
+        console.error('[Stream] FFmpeg spawn failed:', err);
+        if (!res.headersSent) res.status(500).json({ error: 'Transcoding failed' });
     });
 });
 
