@@ -10,34 +10,35 @@ router.get('/', (req, res) => {
     if (!url) return res.status(400).json({ error: 'URL parameter is required' });
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
-    const isVOD = type === 'vod' || url.includes('/movie/') || url.toLowerCase().endsWith('.mkv');
+    // Detección mejorada: si la URL contiene movie/series o es mkv, es VOD por defecto
+    const isVOD = type === 'vod' || url.includes('/movie/') || url.includes('/series/') || url.toLowerCase().endsWith('.mkv');
 
-    // CONFIGURACIÓN CRÍTICA PARA SEEK
-    // VOD: Eliminamos frag_keyframe para que el navegador lo vea como un archivo MP4 estándar.
+    // CONFIGURACIÓN MAESTRA PARA SEEK
+    // Para VOD eliminamos frag_keyframe para que el navegador no crea que es un "en vivo" infinito.
     const movFlags = isVOD
         ? 'faststart+empty_moov+omit_tfhd_offset+frag_discont' 
         : 'frag_keyframe+empty_moov+default_base_moof';
 
     const bufSize = isVOD ? '100M' : '10M';
 
-    // Headers necesarios para habilitar el salto de tiempo (Accept-Ranges)
+    // Headers para habilitar el salto de tiempo (Seek) en cualquier navegador
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Accept-Ranges', 'bytes'); // Indica al navegador que puede pedir partes del archivo
+    res.setHeader('Accept-Ranges', 'bytes'); // Crucial para que el navegador sepa que puede saltar
 
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
-        '-seekable', '1', // Permite que FFmpeg salte en el origen si el servidor IPTV lo soporta
+        '-seekable', '1', // Obliga a FFmpeg a permitir saltos en el stream de origen
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '4',
         '-i', url,
         '-map', '0:v:0',
         '-map', '0:a:0?',
-        '-c:v', 'copy', // Mantiene video original (0% CPU en RPi4)
-        '-c:a', 'aac',  // Audio compatible universal
+        '-c:v', 'copy', // 0% CPU en Raspberry Pi 4
+        '-c:a', 'aac',  // Audio universal para todos los navegadores
         '-ac', '2',
         '-b:a', '192k',
         '-af', 'aresample=async=1:min_hard_comp=0.100:first_pts=0',
@@ -54,14 +55,16 @@ router.get('/', (req, res) => {
 
     const ffmpeg = spawn(ffmpegPath, args);
 
-    // Tubería de salida
+    // Tubería de salida directamente al navegador
     ffmpeg.stdout.pipe(res);
 
+    // Captura de errores para el Log Viewer
     ffmpeg.stderr.on('data', data => {
         const msg = data.toString();
         if (msg.toLowerCase().includes('error')) console.error('[FFmpeg Error]', msg);
     });
 
+    // Limpieza total al cerrar la pestaña o el reproductor
     req.on('close', () => {
         console.log('[Stream] Cliente desconectado, cerrando FFmpeg');
         ffmpeg.kill('SIGKILL');
