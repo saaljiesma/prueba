@@ -3,7 +3,7 @@ const router = express.Router();
 const { spawn } = require('child_process');
 
 /**
- * Stream VOD/LIVE optimizado
+ * Stream VOD/LIVE optimizado para barra completa y seek
  * GET /stream?url=...&type=vod|live
  */
 router.get('/', (req, res) => {
@@ -13,10 +13,11 @@ router.get('/', (req, res) => {
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
     const isVOD = type === 'vod';
 
-    // Movflags y bufsize según tipo
-    const movFlags = isVOD 
+    // Movflags según tipo
+    const movFlags = isVOD
         ? 'faststart+frag_keyframe+default_base_moof' // VOD → barra completa y seek funcional
         : 'frag_keyframe+empty_moov+default_base_moof'; // LIVE → baja latencia
+
     const bufSize = isVOD ? '100M' : '10M';
 
     // Headers para navegador
@@ -24,7 +25,7 @@ router.get('/', (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('X-Content-Type-Options', 'nosniff');
 
-    // FFmpeg args
+    // FFmpeg arguments
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
@@ -47,6 +48,9 @@ router.get('/', (req, res) => {
         '-flush_packets', '1',
         '-'
     ];
+
+    console.log(`[NodeCast] Iniciando: ${isVOD ? 'PELÍCULA (Modo Barra Completa)' : 'LIVE (Baja Latencia)'}`);
+    console.log(`[FFmpeg] Comando completo: ${ffmpegPath} ${args.join(' ')}`);
 
     const ffmpeg = spawn(ffmpegPath, args);
 
