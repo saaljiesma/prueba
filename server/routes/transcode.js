@@ -3,7 +3,7 @@ const router = express.Router();
 const { spawn } = require('child_process');
 
 /**
- * Stream VOD/LIVE optimizado para duración completa y seek funcional
+ * Stream VOD/LIVE optimizado para barra completa y seek
  * GET /stream?url=...&type=vod|live
  */
 router.get('/', (req, res) => {
@@ -13,19 +13,19 @@ router.get('/', (req, res) => {
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
     const isVOD = type === 'vod';
 
-    // Movflags y bufsize según tipo
+    // Movflags según tipo
     const movFlags = isVOD
-        ? 'faststart+frag_keyframe+default_base_moof' // VOD → duración completa y seek
+        ? 'faststart+frag_keyframe+default_base_moof' // VOD → barra completa y seek funcional
         : 'frag_keyframe+empty_moov+default_base_moof'; // LIVE → baja latencia
+
     const bufSize = isVOD ? '100M' : '10M';
 
     // Headers para navegador
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Accept-Ranges', 'bytes'); // Crucial para seek
 
-    // FFmpeg args
+    // FFmpeg arguments
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
@@ -40,7 +40,7 @@ router.get('/', (req, res) => {
         '-ac', '2',
         '-b:a', '192k',
         '-af', 'aresample=async=1:min_hard_comp=0.100:first_pts=0',
-        '-g', isVOD ? '48' : '250', // keyframes frecuentes en VOD para seek
+        '-g', isVOD ? '48' : '250', // keyframes frecuentes en VOD para seek rápido
         '-f', 'mp4',
         '-movflags', movFlags,
         '-bufsize', bufSize,
@@ -49,21 +49,18 @@ router.get('/', (req, res) => {
         '-'
     ];
 
-    console.log(`[NodeCast] Modo: ${isVOD ? 'PELÍCULA (Duración completa)' : 'LIVE (Baja Latencia)'}`);
-    console.log(`[FFmpeg] Comando: ${ffmpegPath} ${args.join(' ')}`);
+    console.log(`[NodeCast] Iniciando: ${isVOD ? 'PELÍCULA (Modo Barra Completa)' : 'LIVE (Baja Latencia)'}`);
+    console.log(`[FFmpeg] Comando completo: ${ffmpegPath} ${args.join(' ')}`);
 
     const ffmpeg = spawn(ffmpegPath, args);
 
-    // Tubería de salida al navegador
     ffmpeg.stdout.pipe(res);
 
-    // Captura de errores
     ffmpeg.stderr.on('data', data => {
         const msg = data.toString();
         if (msg.toLowerCase().includes('error')) console.error('[FFmpeg Error]', msg);
     });
 
-    // Limpieza al cerrar la pestaña
     req.on('close', () => {
         console.log('[Stream] Cliente desconectado, matando FFmpeg');
         ffmpeg.kill('SIGKILL');
