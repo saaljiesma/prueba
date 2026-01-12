@@ -4,26 +4,35 @@ const { spawn } = require('child_process');
 
 /**
  * Stream VOD/LIVE optimizado para barra completa y seek
- * GET /stream?url=...&type=vod|live
  */
 router.get('/', (req, res) => {
     const { url, type } = req.query;
     if (!url) return res.status(400).json({ error: 'URL parameter is required' });
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
-    const isVOD = type === 'vod';
 
-    // Movflags según tipo
+    // ✅ DETECCIÓN MEJORADA: 
+    // Ahora identifica VOD por el parámetro TYPE o inspeccionando la URL
+    const isVOD = type === 'vod' || 
+                  url.includes('/movie/') || 
+                  url.includes('/series/') || 
+                  url.toLowerCase().endsWith('.mkv') || 
+                  url.toLowerCase().endsWith('.mp4');
+
+    // ✅ MOVFLAGS CORREGIDOS PARA SEEK:
+    // Para VOD, eliminamos 'frag_keyframe' que es lo que rompe la barra de búsqueda.
+    // Usamos 'faststart' para que el navegador pueda leer el índice del video.
     const movFlags = isVOD
-        ? 'faststart+frag_keyframe+default_base_moof' // VOD → barra completa y seek funcional
-        : 'frag_keyframe+empty_moov+default_base_moof'; // LIVE → baja latencia
+        ? 'faststart+empty_moov+omit_tfhd_offset+frag_discont' 
+        : 'frag_keyframe+empty_moov+default_base_moof';
 
     const bufSize = isVOD ? '100M' : '10M';
 
-    // Headers para navegador
+    // Headers para navegador - Añadimos Accept-Ranges para habilitar el salto
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (isVOD) res.setHeader('Accept-Ranges', 'bytes'); 
 
     // FFmpeg arguments
     const args = [
@@ -40,16 +49,15 @@ router.get('/', (req, res) => {
         '-ac', '2',
         '-b:a', '192k',
         '-af', 'aresample=async=1:min_hard_comp=0.100:first_pts=0',
-        '-g', isVOD ? '48' : '250', // keyframes frecuentes en VOD para seek rápido
+        // En VOD no forzamos -g 48 si usamos copy, dejamos que el original mande
         '-f', 'mp4',
         '-movflags', movFlags,
         '-bufsize', bufSize,
         '-max_muxing_queue_size', '4096',
-        '-flush_packets', '1',
         '-'
     ];
 
-    console.log(`[NodeCast] Iniciando: ${isVOD ? 'PELÍCULA (Modo Barra Completa)' : 'LIVE (Baja Latencia)'}`);
+    console.log(`[NodeCast] Iniciando: ${isVOD ? 'PELÍCULA (Modo Seek Habilitado)' : 'LIVE (Baja Latencia)'}`);
     console.log(`[FFmpeg] Comando completo: ${ffmpegPath} ${args.join(' ')}`);
 
     const ffmpeg = spawn(ffmpegPath, args);
