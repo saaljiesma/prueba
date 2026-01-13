@@ -155,7 +155,36 @@ class VideoPlayer {
         const btnFullscreen = document.getElementById('btn-fullscreen');
         const volumeSlider = document.getElementById('player-volume');
         const channelNameEl = document.getElementById('player-channel-name');
+        const progressBar = document.getElementById('player-progress');
+        const currentTimeEl = document.getElementById('current-time');
+        const durationEl = document.getElementById('total-duration');
 
+        // Actualizar barra y números mientras el video avanza
+        this.video.addEventListener('timeupdate', () => {
+            if (this.videoDuration > 0) {
+                // Calculamos el porcentaje (de 0 a 100)
+                const percent = (this.video.currentTime / this.videoDuration) * 100;
+                if (progressBar) progressBar.value = percent;
+                
+                // Actualizamos los textos de tiempo
+                if (currentTimeEl) currentTimeEl.textContent = this.formatTime(this.video.currentTime);
+                if (durationEl) durationEl.textContent = this.formatTime(this.videoDuration);
+            } else {
+                // Si es Live TV
+                if (currentTimeEl) currentTimeEl.textContent = this.formatTime(this.video.currentTime);
+                if (durationEl) durationEl.textContent = "Live";
+            }
+        });
+
+        // Permitir al usuario saltar a un punto (Seek) al mover la barra
+        progressBar?.addEventListener('input', (e) => {
+            if (this.videoDuration > 0) {
+                const seekTo = (e.target.value / 100) * this.videoDuration;
+                this.video.currentTime = seekTo;
+            }
+        });
+        // --- FIN DEL BLOQUE ---
+    
         if (!this.controlsOverlay) return;
 
         // Disable native controls
@@ -699,11 +728,17 @@ class VideoPlayer {
                     }
 
                     if (info.needsTranscode) {
+                        
                         // Incompatible audio (AC3/EAC3/DTS) - use transcode
                         console.log('[Player] Auto: Using transcode (incompatible audio)');
                         const transcodeUrl = `/api/transcode?url=${encodeURIComponent(streamUrl)}`;
                         this.currentUrl = transcodeUrl;
                         this.video.src = transcodeUrl;
+                        if (info.duration > 0) {
+                            // Esto guarda la duración para que puedas usarla en tu barra de progreso
+                            this.videoDuration = info.duration; 
+                            console.log("Duración total detectada:", this.videoDuration);
+                        }
                         this.video.play().catch(e => {
                             if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
                         });
