@@ -83,11 +83,11 @@ function analyzeProbeResult(probeResult, url) {
 
     const videoStream = streams.find(s => s.codec_type === 'video');
     const audioStream = streams.find(s => s.codec_type === 'audio');
+    const duration = parseFloat(format.duration) || 0;
 
     const videoCodec = videoStream?.codec_name?.toLowerCase() || 'unknown';
     const audioCodec = audioStream?.codec_name?.toLowerCase() || 'unknown';
     const container = format.format_name?.toLowerCase() || 'unknown';
-
     // Check codec compatibility
     const videoOk = BROWSER_VIDEO_CODECS.some(c => videoCodec.includes(c));
     const audioOk = BROWSER_AUDIO_CODECS.some(c => audioCodec.includes(c));
@@ -126,6 +126,7 @@ function analyzeProbeResult(probeResult, url) {
         audio: audioCodec,
         container: container,
         compatible: compatible,
+        duration: duration, // <-- AÑADE ESTO AL OBJETO QUE RETORNA
         needsRemux: needsRemux,
         needsTranscode: needsTranscode,
         subtitles: subtitles
