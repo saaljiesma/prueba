@@ -146,8 +146,20 @@
 
                 <!-- Bottom Bar: Controls -->
                 <div class="watch-bottom-bar">
+                  <div class="watch-progress-area">
+                    <input type="range" class="watch-progress-bar" id="player-progress" min="0" max="100" value="0" step="0.1">
+                    <div class="watch-time-display">
+                      <span id="current-time">00:00</span>
+                      <span>/</span>
+                      <span id="total-duration">00:00</span>
+                    </div>
+                  </div>
+
                   <div class="watch-controls">
                     <button class="watch-btn watch-btn-lg" id="btn-play" title="Play/Pause">
+                      </button>
+                    </div>
+                </div>
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
                         class="icon icon-play">
                         <path d="M8 5v14l11-7z" />
