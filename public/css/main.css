@@ -3888,4 +3888,46 @@ kbd {
   .next-info h4 {
     max-width: none;
   }
+  .watch-progress-area {
+    width: 100%;
+    padding: 0 15px;
+    margin-bottom: 5px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .watch-progress-bar {
+    width: 100%;
+    height: 4px;
+    -webkit-appearance: none;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 2px;
+    cursor: pointer;
+    outline: none;
+    transition: height 0.1s;
+  }
+
+  .watch-progress-bar:hover {
+    height: 6px;
+  }
+
+  .watch-progress-bar::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #ff0000; /* Color rojo estilo YouTube */
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  .watch-time-display {
+    color: white;
+    font-size: 12px;
+    margin-top: 4px;
+    font-family: 'Roboto', sans-serif;
+    display: flex;
+    gap: 4px;
+    opacity: 0.9;
+  }
 }
